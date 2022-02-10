@@ -1,0 +1,127 @@
+# Variable 'serviceconn' was defined in the Variables tab
+name: $(date:yyyyMMdd)$(rev:.r)
+
+trigger:
+  - main
+  - develop
+resources:
+  repositories:
+  - repository: self
+    type: git
+    ref: refs/heads/main
+
+stages:
+  - stage: Build
+    jobs:
+    - job: BuildDotNet
+      displayName: Agent job 1
+      pool:
+        vmImage: ubuntu-latest
+      steps:
+      - checkout: self
+        clean: true
+      - task: DotNetCoreCLI@2
+        displayName: Restore
+        inputs:
+          command: restore
+          projects: '**/*.csproj'
+      - task: DotNetCoreCLI@2
+        displayName: Build
+        inputs:
+          projects: '**/*.csproj'
+          arguments: --configuration release
+      - task: DotNetCoreCLI@2
+        displayName: Publish
+        inputs:
+          command: publish
+          arguments: '--configuration $(BuildConfiguration) --output $(Build.ArtifactStagingDirectory)'
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish Artifact: drop'
+
+  - stage: Deploy to Qa
+    jobs:
+    - deployment: IISDeploy
+      displayName: web
+      condition: contains(variables['build.sourceBranch'], 'refs/heads/develop')
+      environment:
+        name: dev
+        resourceType: VirtualMachine
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - download: current
+              artifact: drop
+            - task: IISWebAppManagementOnMachineGroup@0
+              displayName: 'IIS Web App Manage'
+              enabled: false
+              inputs:
+                EnableIIS: false
+                WebsiteName: dotnetwebapp
+                CreateOrUpdateAppPoolForWebsite: true
+                AppPoolNameForWebsite: dotnetwebapp
+                ParentWebsiteNameForVD: dotnetwebapp
+                ParentWebsiteNameForApplication: dotnetwebapp
+
+            - task: rbosma.InstallNetCoreRuntimeAndHosting.InstallNetCoreRuntimeAndHosting.InstallNetCoreRuntimeAndHosting@1
+              displayName: 'Install .NET Core Runtime & Hosting Version 3.0'
+              enabled: false
+
+            - task: IISWebAppDeploymentOnMachineGroup@0
+              displayName: 'IIS Web App Deploy'
+              inputs:
+                WebSiteName: 'dotnetwebapp'
+                Package: '$(Pipeline.Workspace)/drop/dotnetwebapp.zip'
+                XmlVariableSubstitution: True
+
+          on:
+            failure:
+              steps:
+              - script: echo Restore from backup! This is on failure
+            success:
+              steps:
+              - script: echo Notify! This is on success
+
+  - stage: Deploy to Staging
+    jobs:
+    - deployment: IISDeploy
+      displayName: web
+      condition: contains(variables['build.sourceBranch'], 'refs/heads/main')
+      environment:
+        name: Staging
+        resourceType: VirtualMachine
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - download: current
+              artifact: drop
+            - task: IISWebAppManagementOnMachineGroup@0
+              displayName: 'IIS Web App Manage'
+              enabled: false
+              inputs:
+                EnableIIS: false
+                WebsiteName: dotnetwebapp
+                CreateOrUpdateAppPoolForWebsite: true
+                AppPoolNameForWebsite: dotnetwebapp
+                ParentWebsiteNameForVD: dotnetwebapp
+                ParentWebsiteNameForApplication: dotnetwebapp
+
+            - task: rbosma.InstallNetCoreRuntimeAndHosting.InstallNetCoreRuntimeAndHosting.InstallNetCoreRuntimeAndHosting@1
+              displayName: 'Install .NET Core Runtime & Hosting Version 3.0'
+              enabled: false
+
+            - task: IISWebAppDeploymentOnMachineGroup@0
+              displayName: 'IIS Web App Deploy'
+              inputs:
+                WebSiteName: 'dotnetwebapp'
+                Package: '$(Pipeline.Workspace)/drop/dotnetwebapp.zip'
+                XmlVariableSubstitution: True
+
+          on:
+            failure:
+              steps:
+              - script: echo Restore from backup! This is on failure
+            success:
+              steps:
+              - script: echo Notify! This is on success
